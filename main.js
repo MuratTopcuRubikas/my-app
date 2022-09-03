@@ -1,8 +1,7 @@
 import './style.css';
+import 'ol-layerswitcher/dist/ol-layerswitcher.css';
 import {Map, View} from 'ol';
-import {Tile as TileLayer, Vector as VectorLayer} from 'ol/layer';
-import TileJSON from 'ol/source/TileJSON';
-
+import {Vector as VectorLayer} from 'ol/layer';
 import {fromLonLat} from 'ol/proj';
 import Feature from 'ol/Feature';
 import {LineString, Point} from 'ol/geom';
@@ -13,25 +12,16 @@ import {
   defaults as defaultInteractions,
 } from 'ol/interaction';
 import {FullScreen, defaults as defaultControls} from 'ol/control';
+import {apply} from 'ol-mapbox-style';
+import Rotate from 'ol/control/Rotate';
+import Overlay from 'ol/Overlay';
+import Geolocation from 'ol/Geolocation';
+import LayerSwitcher from 'ol-layerswitcher';
+import { BaseLayerOptions, GroupLayerOptions } from 'ol-layerswitcher';
+import TileLayer from 'ol/layer/Tile';
+import XYZ from 'ol/source/XYZ';
 
-const centerCoordinate=[29.8846559, 40.7031319];
-
-const car = new Feature({
-  geometry: new Point(fromLonLat(centerCoordinate)),
-});
-
-car.setStyle(
-  new Style({
-    image: new Icon({
-      color: '#BADA55',
-      crossOrigin: 'anonymous',
-      src: 'send.svg',
-    }),
-  })
-);
-
-
-
+const centerCoordinate=[29.9786849, 40.7919762];
 
 const carHistory = new Feature(
   new LineString([
@@ -215,9 +205,25 @@ const carHistory = new Feature(
     fromLonLat([29.8847239, 40.7031679]),
     fromLonLat([29.8847147, 40.7031632]),
     fromLonLat([29.8847037, 40.7031597]),
-    fromLonLat([29.8846664, 40.7031341]),
-    fromLonLat(centerCoordinate),
+    fromLonLat([29.8846664, 40.7031341]),    
   ])
+);
+
+
+
+const car = new Feature({
+  geometry: new Point(fromLonLat(centerCoordinate)),
+});
+
+car.setStyle(
+  new Style({
+    image: new Icon({
+      color: '#BADA55',
+      crossOrigin: 'anonymous',
+      src: 'RedCar.svg',      
+      imgSize:[40, 40]
+    }),
+  })
 );
 
 const style = new Style({
@@ -229,37 +235,251 @@ const style = new Style({
 carHistory.setStyle(style);
 
 
+
 const vectorSource = new VectorSource({
-  features: [car, carHistory],
+  features: [carHistory],
 });
 
 const vectorLayer = new VectorLayer({
+  title:'Araçlar'  ,
+
   source: vectorSource,  
+  zIndex:100
 });
 
 const key = 'U7ypMlIw5T2FUxvZh4n5';
+const url = 'https://api.maptiler.com/maps/hybrid/style.json?key=' + key;
+
 const attributions =  'Demo by <a href="https://rubikas.com/"><b>&copy;Rubikas</b></a> '+  
                       '<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> ' +
                       '<a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a> ';
 
-
-
-const rasterLayer = new TileLayer({
-  source: new TileJSON({
-    attributions: attributions,
-    url: `https://api.maptiler.com/maps/streets/tiles.json?key=`+key, // source URL
-    tileSize: 512,
-    crossOrigin: 'anonymous'
-  }),
+var view = new View({
+  constrainResolution: true,
+  center: fromLonLat(centerCoordinate),
+  zoom: 19
 });
+
+const tileLayer = new TileLayer({
+  source: new XYZ({
+    url:
+      ' https://mt0.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}&s=Ga',
+  }),
+})
 
 const map = new Map({
-  controls: defaultControls().extend([new FullScreen()]),
+  controls: defaultControls().extend([new FullScreen(), new Rotate()]),
   interactions: defaultInteractions().extend([new DragRotateAndZoom()]),
   target: 'map',
-  layers: [rasterLayer, vectorLayer],
-  view: new View({
-    center: fromLonLat(centerCoordinate) ,
-    zoom: 15
-  })
+  layers: [tileLayer,vectorLayer],
+  view: view
 });
+//apply(map,url);
+//map.addLayer(vectorLayer);
+ //mapView.center([29.8846559, 40.7031319]);
+
+ // Geolocation marker
+const markerEl = document.getElementById('geolocation_marker');
+const marker = new Overlay({
+  positioning: 'center-center',
+  element: markerEl,
+  stopEvent: false,
+});
+map.addOverlay(marker);
+
+// LineString to store the different geolocation positions. This LineString
+// is time aware.
+// The Z dimension is actually used to store the rotation (heading).
+const positions = new LineString([], 'XYZM');
+
+
+// Geolocation Control
+const geolocation = new Geolocation({
+  projection: view.getProjection(),
+  trackingOptions: {
+    maximumAge: 10000,
+    enableHighAccuracy: true,
+    timeout: 600000,
+  },
+});
+
+let deltaMean = 500; // the geolocation sampling period mean in ms
+
+
+// Listen to position changes
+geolocation.on('change', function () {
+  const position = geolocation.getPosition();
+  const accuracy = geolocation.getAccuracy();
+  const heading = geolocation.getHeading() || 0;
+  const speed = geolocation.getSpeed() || 0;
+  const m = Date.now();
+
+  addPosition(position, heading, m, speed);
+
+  const coords = positions.getCoordinates();
+  const len = coords.length;
+  if (len >= 2) {
+    deltaMean = (coords[len - 1][3] - coords[0][3]) / (len - 1);
+  }
+
+  const html = [
+    'Position: ' + position[0].toFixed(2) + ', ' + position[1].toFixed(2),
+    'Accuracy: ' + accuracy,
+    'Heading: ' + Math.round(radToDeg(heading)) + '&deg;',
+    'Speed: ' + (speed * 3.6).toFixed(1) + ' km/h',
+    'Delta: ' + Math.round(deltaMean) + 'ms',
+  ].join('<br />');
+  document.getElementById('info').innerHTML = html;
+});
+
+geolocation.on('error', function () {
+  alert('geolocation error');
+  // FIXME we should remove the coordinates in positions
+});
+
+// convert radians to degrees
+function radToDeg(rad) {
+  return (rad * 360) / (Math.PI * 2);
+}
+// convert degrees to radians
+function degToRad(deg) {
+  return (deg * Math.PI * 2) / 360;
+}
+// modulo for negative values
+function mod(n) {
+  return ((n % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+}
+
+function addPosition(position, heading, m, speed) {
+  const x = position[0];
+  const y = position[1];
+  const fCoords = positions.getCoordinates();
+  const previous = fCoords[fCoords.length - 1];
+  const prevHeading = previous && previous[2];
+  if (prevHeading) {
+    let headingDiff = heading - mod(prevHeading);
+
+    // force the rotation change to be less than 180°
+    if (Math.abs(headingDiff) > Math.PI) {
+      const sign = headingDiff >= 0 ? 1 : -1;
+      headingDiff = -sign * (2 * Math.PI - Math.abs(headingDiff));
+    }
+    heading = prevHeading + headingDiff;
+  }
+  positions.appendCoordinate([x, y, heading, m]);
+
+  // only keep the 20 last coordinates
+  positions.setCoordinates(positions.getCoordinates().slice(-20));
+
+  // FIXME use speed instead
+  if (heading && speed) {
+    markerEl.src = 'RedCar.svg';
+  } else {
+    markerEl.src = 'RedCar.svg';
+  }
+}
+
+// recenters the view by putting the given coordinates at 3/4 from the top or
+// the screen
+function getCenterWithHeading(position, rotation, resolution) {
+  const size = map.getSize();
+  const height = size[1];
+
+  return [
+    position[0] - (Math.sin(rotation) * height * resolution * 1) / 4,
+    position[1] + (Math.cos(rotation) * height * resolution * 1) / 4,
+  ];
+}
+
+let previousM = 0;
+function updateView() {
+  // use sampling period to get a smooth transition
+  let m = Date.now() - deltaMean * 1.5;
+  m = Math.max(m, previousM);
+  previousM = m;
+  // interpolate position along positions LineString
+  const c = positions.getCoordinateAtM(m, true);
+  if (c) {
+    view.setCenter(getCenterWithHeading(c, -c[2], view.getResolution()));
+    view.setRotation(-c[2]);
+    marker.setPosition(c);
+    map.render();
+  }
+}
+
+// geolocate device
+/*
+const geolocateBtn = document.getElementById('geolocate');
+geolocateBtn.addEventListener(
+  'click',
+  function () {
+    geolocation.setTracking(true); // Start position tracking
+
+    tileLayer.on('postrender', updateView);
+    map.render();
+
+    disableButtons();
+  },
+  false
+);
+ */
+
+// simulate device move
+let simulationData;
+const client = new XMLHttpRequest();
+client.open('GET', 'geolocation-orientation.json');
+
+/**
+ * Handle data loading.
+ */
+client.onload = function () {
+  simulationData = JSON.parse(client.responseText).data;
+};
+client.send();
+
+const simulateBtn = document.getElementById('simulate');
+simulateBtn.addEventListener(
+  'click',
+  function () {
+    const coordinates = simulationData;
+
+    const first = coordinates.shift();
+    simulatePositionChange(first);
+
+    let prevDate = first.timestamp;
+    function geolocate() {
+      const position = coordinates.shift();
+      if (!position) {
+        return;
+      }
+      const newDate = position.timestamp;
+      simulatePositionChange(position);
+      window.setTimeout(function () {
+        prevDate = newDate;
+        geolocate();
+      }, (newDate - prevDate) / 0.5);
+    }
+    geolocate();
+
+    tileLayer.on('postrender', updateView);
+    map.render();
+
+    disableButtons();
+  },
+  false
+);
+
+function simulatePositionChange(position) {
+  const coords = position.coords;
+  geolocation.set('accuracy', coords.accuracy);
+  geolocation.set('heading', degToRad(coords.heading));
+  const projectedPosition = fromLonLat([coords.longitude, coords.latitude]);
+  geolocation.set('position', projectedPosition);
+  geolocation.set('speed', coords.speed);
+  geolocation.changed();
+}
+
+function disableButtons() {
+  //geolocateBtn.disabled = 'disabled';
+  simulateBtn.disabled = 'disabled';
+}

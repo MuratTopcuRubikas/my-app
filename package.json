@@ -1,15 +1,18 @@
 {
   "name": "my-app",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "scripts": {
     "start": "vite",
     "build": "vite build",
     "serve": "vite preview"
   },
   "devDependencies": {
+    "@babel/core": "latest",
     "vite": "^3.0.3"
   },
   "dependencies": {
-    "ol": "latest"
+    "ol": "7.1.0",
+    "ol-layerswitcher": "^4.0.0",
+    "ol-mapbox-style": "^8.2.1"
   }
 }
